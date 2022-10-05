@@ -1,0 +1,15 @@
+[package]
+name = "skelphore"
+version = "0.1.0"
+edition = "2018"
+authors = ["Artyom Sakharilenko <kryvashek@gmail.com>"]
+description = "Structured output helpers for display mode "
+repository = "https://github.com/kryvashek/skelphore"
+license = "MIT"
+keywords = ["web", "http", "request", "ping"]
+categories = ["asynchronous", "network-programming", "web-programming::http-client"]
+
+[lib]
+crate-type = ["staticlib", "rlib"]
+
+[dependencies]
