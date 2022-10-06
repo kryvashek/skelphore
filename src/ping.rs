@@ -1,7 +1,7 @@
 use reqwest::{Method, RequestBuilder, StatusCode};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use serde_with::{serde_as, DisplayFromStr};
-use std::{convert::Infallible, fmt::Display, future::Future, time::Duration};
+use std::{convert::Infallible, fmt::Display, future::Future, marker::PhantomData, time::Duration};
 
 #[serde_as]
 #[derive(Clone, Debug, Deserialize)]
@@ -66,15 +66,15 @@ impl Sleep for DontSleep {
     async fn sleep(_duration: Duration) {}
 }
 
-pub trait ProcessError {
-    fn process_ping_error(error: Error);
+pub trait ProcessError<R: Display> {
+    fn process_ping_error(error: Error<R>);
     fn process_request_clone_fail();
 }
 
-pub struct DontProcessError;
+pub struct DontProcessError<R: Display>(PhantomData<R>);
 
-impl ProcessError for DontProcessError {
-    fn process_ping_error(_error: Error) {}
+impl<R: Display> ProcessError<R> for DontProcessError<R> {
+    fn process_ping_error(_error: Error<R>) {}
     fn process_request_clone_fail() {}
 }
 
@@ -118,7 +118,7 @@ pub trait Behaviour: 'static {
     type Question: Question;
     type Answer: Answer;
     type Sleep: Sleep;
-    type ProcessError: ProcessError;
+    type ProcessError: ProcessError<<<Self as Behaviour>::Answer as Answer>::Fail>;
     type Spawn: Spawn;
 }
 
@@ -128,11 +128,13 @@ impl Behaviour for MinimalBehaviour {
     type Question = EmptyQuestion;
     type Answer = EmptyAnswer;
     type Sleep = DontSleep;
-    type ProcessError = DontProcessError;
+    type ProcessError = DontProcessError<<EmptyAnswer as Answer>::Fail>;
     type Spawn = DontSpawn;
 }
 
-async fn ping_once<Q: Question, A: Answer>(mut request: RequestBuilder) -> Result<(), Error> {
+async fn ping_once<Q: Question, A: Answer>(
+    mut request: RequestBuilder,
+) -> Result<(), Error<A::Fail>> {
     if let Some(question) = Q::ask() {
         request = request.json(&question);
     };
@@ -144,10 +146,7 @@ async fn ping_once<Q: Question, A: Answer>(mut request: RequestBuilder) -> Resul
         .map_err(Error::Response)?
         .positivness();
     match (status.is_success(), positivness_result) {
-        (_, Err(error)) => Err(Error::NegativeResult {
-            status,
-            result: error.to_string(),
-        }),
+        (_, Err(result)) => Err(Error::NegativeResult { status, result }),
         (false, Ok(_)) => Err(Error::NegativeStatus(status)),
         (true, Ok(_)) => Ok(()),
     }
@@ -181,13 +180,13 @@ pub fn pinger<B: Behaviour>(
 }
 
 #[derive(Debug, thiserror::Error)] // NOTE: impossible to derive from Clone because reqwest::Error doesn't implement it
-pub enum Error {
+pub enum Error<R: Display> {
     #[error("Failed sending ping request: {0}")]
     Request(reqwest::Error),
     #[error("Failed receiving ping response: {0}")]
     Response(reqwest::Error),
     #[error("Negative ping result with status {status}: {result}")]
-    NegativeResult { status: StatusCode, result: String },
+    NegativeResult { status: StatusCode, result: R },
     #[error("Negative ping status {0}")]
     NegativeStatus(StatusCode),
 }
