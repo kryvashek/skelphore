@@ -78,40 +78,31 @@ impl<R: Display> ProcessError<R> for DontProcessError<R> {
     fn process_request_clone_fail() {}
 }
 
-pub trait Handle {
+pub trait Handling {
+    type Handle;
     type Output;
-
-    fn stop(&self);
-}
-
-pub struct NoSpawnHandle;
-
-impl Handle for NoSpawnHandle {
-    type Output = ();
-
-    fn stop(&self) {}
-}
-
-pub trait Spawn {
-    type Handle: Handle;
 
     fn spawn<Fut>(f: Fut) -> Self::Handle
     where
-        Fut: Future<Output = <Self::Handle as Handle>::Output> + 'static;
+        Fut: Future<Output = Self::Output> + 'static;
+
+    fn stop(handle: Self::Handle);
 }
 
-pub struct DontSpawn;
+pub struct NoHandling;
 
-impl Spawn for DontSpawn {
-    type Handle = NoSpawnHandle;
+impl Handling for NoHandling {
+    type Handle = ();
+    type Output = ();
 
     fn spawn<Fut>(_: Fut) -> Self::Handle
     where
         Fut: Future + 'static,
         Fut::Output: 'static,
     {
-        NoSpawnHandle
     }
+
+    fn stop(_: Self::Handle) {}
 }
 
 pub trait Behaviour: 'static {
@@ -119,7 +110,7 @@ pub trait Behaviour: 'static {
     type Answer: Answer;
     type Sleep: Sleep;
     type ProcessError: ProcessError<<<Self as Behaviour>::Answer as Answer>::Fail>;
-    type Spawn: Spawn;
+    type Handling: Handling;
 }
 
 pub struct MinimalBehaviour;
@@ -129,7 +120,7 @@ impl Behaviour for MinimalBehaviour {
     type Answer = EmptyAnswer;
     type Sleep = DontSleep;
     type ProcessError = DontProcessError<<EmptyAnswer as Answer>::Fail>;
-    type Spawn = DontSpawn;
+    type Handling = NoHandling;
 }
 
 async fn ping_once<Q: Question, A: Answer>(
@@ -155,8 +146,8 @@ async fn ping_once<Q: Question, A: Answer>(
 pub fn pinger<B: Behaviour>(
     request: RequestBuilder,
     period: Duration,
-) -> <<B as Behaviour>::Spawn as Spawn>::Handle {
-    B::Spawn::spawn(async move {
+) -> <<B as Behaviour>::Handling as Handling>::Handle {
+    B::Handling::spawn(async move {
         let mut current_period = period;
         loop {
             let request_clone = match request.try_clone() {
