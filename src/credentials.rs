@@ -55,7 +55,7 @@ impl HeaderMapInsertString for HeaderMap<HeaderValue> {
     }
 }
 
-#[derive(Debug, thiserror::Error)] // NOTE: Clone невозможен, т.к. не реализуется reqwest::header::InvalidHeaderValue
+#[derive(Debug, thiserror::Error)] // NOTE: impossible to derive from Clone because reqwest::header::InvalidHeaderValue doesn't implement it
 pub enum Error {
     #[error("Failed making header value for header '{key}' from text '{val}': {source}")]
     InvalidHeaderValue {
