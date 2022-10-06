@@ -9,6 +9,7 @@ use serde::Deserialize;
 use std::{
     convert::{TryFrom, TryInto},
     fmt::{Debug, Formatter, Result as FmtResult},
+    hash::Hash,
     str::FromStr,
     sync::Arc,
     time::Duration,
@@ -16,8 +17,8 @@ use std::{
 
 use address::Address;
 use credentials::Credentials;
-use ping::{pinger, Behaviour, Handle, MinimalBehaviour, NoSpawnHandle, Spawn};
-use timeoutsmap::{Key, Params, TimeoutsMap, TimeoutsMapConfig, TrivialKey, TrivialParams};
+use ping::{pinger, Behaviour, Handling, MinimalBehaviour, NoHandling};
+use timeoutsmap::{Params, TimeoutsMap, TimeoutsMapConfig, TrivialKey, TrivialParams};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "lowercase")]
@@ -42,7 +43,7 @@ impl From<Scheme> for &str {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct HostConfig<K: Key> {
+pub struct HostConfig<K: Eq + Hash + Into<usize> + Default> {
     #[serde(default, flatten)]
     pub credentials: Option<Credentials>,
     #[serde(default)]
@@ -55,7 +56,7 @@ pub struct HostConfig<K: Key> {
     pub ping: Option<ping::Config>,
 }
 
-impl<T: Key> Default for HostConfig<T> {
+impl<K: Eq + Hash + Into<usize> + Default> Default for HostConfig<K> {
     fn default() -> Self {
         Self {
             credentials: None,
@@ -73,11 +74,11 @@ pub enum PingState<H> {
     Handle(H),
 }
 
-struct HostInner<P: Params = TrivialParams, H: Handle = NoSpawnHandle> {
+struct HostInner<P: Params = TrivialParams, H: Handling = NoHandling> {
     client: Client,
     base_url: Url,
     timeouts: TimeoutsMap<P>,
-    ping: Option<PingState<H>>,
+    ping: Option<PingState<H::Handle>>,
 }
 
 fn base_url(scheme: &'static str, instance: Address) -> Result<Url, Error> {
@@ -85,7 +86,7 @@ fn base_url(scheme: &'static str, instance: Address) -> Result<Url, Error> {
     Url::from_str(&candidate).map_err(|source| Error::UrlParse { candidate, source })
 }
 
-impl<P: Params, H: Handle> HostInner<P, H> {
+impl<P: Params, H: Handling> HostInner<P, H> {
     pub fn new(config: HostConfig<P::Key>) -> Result<Self, Error> {
         let HostConfig {
             credentials,
@@ -143,11 +144,7 @@ impl<P: Params, H: Handle> HostInner<P, H> {
             .header("X-Request-Id", xri)
     }
 
-    pub fn set_pinger<B>(&mut self) -> bool
-    where
-        B: Behaviour,
-        B::Spawn: Spawn<Handle = H>,
-    {
+    pub fn set_pinger<B: Behaviour<Handling = H>>(&mut self) -> bool {
         let ping_state = match self.ping.take() {
             None => return false,
             Some(config) => config,
@@ -166,15 +163,15 @@ impl<P: Params, H: Handle> HostInner<P, H> {
     }
 }
 
-impl<P: Params, H: Handle> Drop for HostInner<P, H> {
+impl<P: Params, H: Handling> Drop for HostInner<P, H> {
     fn drop(&mut self) {
         if let Some(PingState::Handle(handle)) = self.ping.take() {
-            handle.stop()
+            H::stop(handle)
         }
     }
 }
 
-impl<P: Params, H: Handle> TryFrom<HostConfig<P::Key>> for HostInner<P, H> {
+impl<P: Params, H: Handling> TryFrom<HostConfig<P::Key>> for HostInner<P, H> {
     type Error = Error;
 
     fn try_from(value: HostConfig<P::Key>) -> Result<Self, Self::Error> {
@@ -182,14 +179,10 @@ impl<P: Params, H: Handle> TryFrom<HostConfig<P::Key>> for HostInner<P, H> {
     }
 }
 
-pub struct Host<P: Params = TrivialParams, H: Handle = NoSpawnHandle>(Arc<HostInner<P, H>>);
+pub struct Host<P: Params = TrivialParams, H: Handling = NoHandling>(Arc<HostInner<P, H>>);
 
-impl<P: Params, H: Handle> Host<P, H> {
-    pub fn new<B>(config: HostConfig<P::Key>) -> Result<Self, Error>
-    where
-        B: Behaviour,
-        B::Spawn: Spawn<Handle = H>,
-    {
+impl<P: Params, H: Handling> Host<P, H> {
+    pub fn new<B: Behaviour<Handling = H>>(config: HostConfig<P::Key>) -> Result<Self, Error> {
         let mut inner: HostInner<P, H> = config.try_into()?;
         inner.set_pinger::<B>();
         Ok(Self(Arc::new(inner)))
@@ -217,14 +210,14 @@ impl<P: Params, H: Handle> Host<P, H> {
     }
 }
 
-impl Default for Host<TrivialParams, NoSpawnHandle> {
+impl Default for Host<TrivialParams, NoHandling> {
     fn default() -> Self {
         Self::new::<MinimalBehaviour>(HostConfig::<TrivialKey>::default())
             .expect("Failed creating default Host instance")
     }
 }
 
-impl<P: Params, H: Handle> Debug for Host<P, H> {
+impl<P: Params, H: Handling> Debug for Host<P, H> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
         f.debug_struct("Host")
             .field("base_url", &self.0.base_url)
@@ -232,7 +225,7 @@ impl<P: Params, H: Handle> Debug for Host<P, H> {
     }
 }
 
-impl<P: Params, H: Handle> Clone for Host<P, H> {
+impl<P: Params, H: Handling> Clone for Host<P, H> {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
     }
@@ -304,7 +297,7 @@ mod tests {
         assert_eq!(ping.path, "healthcheck");
         assert_eq!(ping.method, Method::GET);
 
-        let _ = Host::<SpecParams, NoSpawnHandle>::new::<MinimalBehaviour>(config)
+        let _ = Host::<SpecParams, NoHandling>::new::<MinimalBehaviour>(config)
             .expect("Host instance should be created from config smoothly");
     }
 }

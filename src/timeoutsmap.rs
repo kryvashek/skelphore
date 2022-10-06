@@ -7,8 +7,6 @@ use std::{
     time::Duration,
 };
 
-pub trait Key: Eq + Hash + Into<usize> + Default {}
-
 #[derive(PartialEq, Eq, Hash, Default, Deserialize)]
 pub struct TrivialKey;
 
@@ -17,8 +15,6 @@ impl From<TrivialKey> for usize {
         0
     }
 }
-
-impl Key for TrivialKey {}
 
 pub trait Array: IndexMut<usize, Output = Duration> {
     fn new(default: Duration) -> Self;
@@ -35,7 +31,7 @@ impl<const N: usize> Array for UsualArray<N> {
 pub type TrivialArray = UsualArray<1>;
 
 pub trait Params {
-    type Key: Key;
+    type Key: Eq + Hash + Into<usize> + Default;
     type Array: Array;
 }
 
@@ -47,7 +43,7 @@ impl Params for TrivialParams {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TimeoutsMapConfig<K: Key = TrivialKey> {
+pub struct TimeoutsMapConfig<K: Eq + Hash + Into<usize> + Default = TrivialKey> {
     #[serde(
         with = "humantime_serde",
         default = "default_timeouts_map_config_default"
@@ -61,8 +57,7 @@ fn default_timeouts_map_config_default() -> Duration {
     Duration::from_millis(120)
 }
 
-impl<K: Key> TimeoutsMapConfig<K> {
-    #[cfg(test)]
+impl<K: Eq + Hash + Into<usize> + Default> TimeoutsMapConfig<K> {
     pub fn only_default(default_ms: u64) -> Self {
         Self {
             default: Duration::from_millis(default_ms),
@@ -75,7 +70,7 @@ impl<K: Key> TimeoutsMapConfig<K> {
     }
 }
 
-impl<K: Key> Default for TimeoutsMapConfig<K> {
+impl<K: Eq + Hash + Into<usize> + Default> Default for TimeoutsMapConfig<K> {
     fn default() -> Self {
         Self {
             default: Self::def_default(),
@@ -126,8 +121,6 @@ pub mod tests {
             src as usize
         }
     }
-
-    impl Key for Spec {}
 
     impl Default for Spec {
         fn default() -> Self {
