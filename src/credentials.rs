@@ -6,7 +6,7 @@ use std::{
     fmt::{Debug, Display, Formatter, Result as FmtResult},
 };
 
-#[derive(Debug, Deserialize, Clone, Default)]
+#[derive(Debug, Deserialize, Clone, Default, PartialEq, Eq)]
 pub struct Credentials {
     #[serde(default)]
     pub name: String,

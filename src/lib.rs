@@ -1,5 +1,5 @@
+pub mod address;
 pub mod credentials;
-pub mod hostandport;
 pub mod ping;
 pub mod timeoutsmap;
 
@@ -14,12 +14,13 @@ use std::{
     time::Duration,
 };
 
+use address::Address;
 use credentials::Credentials;
-use hostandport::HostAndPort;
 use ping::{pinger, Behaviour, Handle, MinimalBehaviour, NoSpawnHandle, Spawn};
 use timeoutsmap::{Key, Params, TimeoutsMap, TimeoutsMapConfig, TrivialKey, TrivialParams};
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
+#[serde(rename_all = "lowercase")]
 pub enum Scheme {
     Http,
     Https,
@@ -41,11 +42,11 @@ impl From<Scheme> for &str {
 }
 
 #[derive(Debug, Deserialize, Clone)]
-pub struct HttpHostConfig<K: Key> {
+pub struct HostConfig<K: Key> {
     #[serde(default, flatten)]
     pub credentials: Option<Credentials>,
     #[serde(default)]
-    pub target: HostAndPort,
+    pub target: Address,
     #[serde(default)]
     pub scheme: Scheme,
     #[serde(default)]
@@ -54,11 +55,11 @@ pub struct HttpHostConfig<K: Key> {
     pub ping: Option<ping::Config>,
 }
 
-impl<T: Key> Default for HttpHostConfig<T> {
+impl<T: Key> Default for HostConfig<T> {
     fn default() -> Self {
         Self {
             credentials: None,
-            target: HostAndPort::default(),
+            target: Address::default(),
             scheme: Default::default(),
             timeouts: Default::default(),
             ping: None,
@@ -72,21 +73,21 @@ pub enum PingState<H> {
     Handle(H),
 }
 
-struct HttpHostInner<P: Params = TrivialParams, H: Handle = NoSpawnHandle> {
+struct HostInner<P: Params = TrivialParams, H: Handle = NoSpawnHandle> {
     client: Client,
     base_url: Url,
     timeouts: TimeoutsMap<P>,
     ping: Option<PingState<H>>,
 }
 
-fn base_url(scheme: &'static str, instance: HostAndPort) -> Result<Url, Error> {
+fn base_url(scheme: &'static str, instance: Address) -> Result<Url, Error> {
     let candidate = format!("{}://{}", scheme, instance);
     Url::from_str(&candidate).map_err(|source| Error::UrlParse { candidate, source })
 }
 
-impl<P: Params, H: Handle> HttpHostInner<P, H> {
-    pub fn new(config: HttpHostConfig<P::Key>) -> Result<Self, Error> {
-        let HttpHostConfig {
+impl<P: Params, H: Handle> HostInner<P, H> {
+    pub fn new(config: HostConfig<P::Key>) -> Result<Self, Error> {
+        let HostConfig {
             credentials,
             target,
             scheme,
@@ -94,8 +95,11 @@ impl<P: Params, H: Handle> HttpHostInner<P, H> {
             ping,
         } = config;
 
-        let mut client =
-            Client::builder().user_agent(formatcp!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION")));
+        let mut client = Client::builder().user_agent(formatcp!(
+            "{}/{}",
+            env!("CARGO_PKG_NAME"),
+            env!("CARGO_PKG_VERSION")
+        ));
 
         if let Some(cred_vals) = credentials {
             client =
@@ -162,7 +166,7 @@ impl<P: Params, H: Handle> HttpHostInner<P, H> {
     }
 }
 
-impl<P: Params, H: Handle> Drop for HttpHostInner<P, H> {
+impl<P: Params, H: Handle> Drop for HostInner<P, H> {
     fn drop(&mut self) {
         if let Some(PingState::Handle(handle)) = self.ping.take() {
             handle.stop()
@@ -170,23 +174,23 @@ impl<P: Params, H: Handle> Drop for HttpHostInner<P, H> {
     }
 }
 
-impl<P: Params, H: Handle> TryFrom<HttpHostConfig<P::Key>> for HttpHostInner<P, H> {
+impl<P: Params, H: Handle> TryFrom<HostConfig<P::Key>> for HostInner<P, H> {
     type Error = Error;
 
-    fn try_from(value: HttpHostConfig<P::Key>) -> Result<Self, Self::Error> {
+    fn try_from(value: HostConfig<P::Key>) -> Result<Self, Self::Error> {
         Self::new(value)
     }
 }
 
-pub struct HttpHost<P: Params = TrivialParams, H: Handle = NoSpawnHandle>(Arc<HttpHostInner<P, H>>);
+pub struct Host<P: Params = TrivialParams, H: Handle = NoSpawnHandle>(Arc<HostInner<P, H>>);
 
-impl<P: Params, H: Handle> HttpHost<P, H> {
-    pub fn new<B>(config: HttpHostConfig<P::Key>) -> Result<Self, Error>
+impl<P: Params, H: Handle> Host<P, H> {
+    pub fn new<B>(config: HostConfig<P::Key>) -> Result<Self, Error>
     where
         B: Behaviour,
         B::Spawn: Spawn<Handle = H>,
     {
-        let mut inner: HttpHostInner<P, H> = config.try_into()?;
+        let mut inner: HostInner<P, H> = config.try_into()?;
         inner.set_pinger::<B>();
         Ok(Self(Arc::new(inner)))
     }
@@ -213,22 +217,22 @@ impl<P: Params, H: Handle> HttpHost<P, H> {
     }
 }
 
-impl Default for HttpHost<TrivialParams, NoSpawnHandle> {
+impl Default for Host<TrivialParams, NoSpawnHandle> {
     fn default() -> Self {
-        Self::new::<MinimalBehaviour>(HttpHostConfig::<TrivialKey>::default())
-            .expect("Failed creating default HttpHost instance")
+        Self::new::<MinimalBehaviour>(HostConfig::<TrivialKey>::default())
+            .expect("Failed creating default Host instance")
     }
 }
 
-impl<P: Params, H: Handle> Debug for HttpHost<P, H> {
+impl<P: Params, H: Handle> Debug for Host<P, H> {
     fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        f.debug_struct("HttpHost")
+        f.debug_struct("Host")
             .field("base_url", &self.0.base_url)
             .finish()
     }
 }
 
-impl<P: Params, H: Handle> Clone for HttpHost<P, H> {
+impl<P: Params, H: Handle> Clone for Host<P, H> {
     fn clone(&self) -> Self {
         Self(Arc::clone(&self.0))
     }
@@ -245,4 +249,62 @@ pub enum Error {
     ClientBulid(#[source] reqwest::Error),
     #[error(transparent)]
     CredentialsConvert(credentials::Error),
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    use crate::timeoutsmap::tests::{Spec, SpecParams};
+
+    const CONFIG_TEXT: &str = r#"
+    name = "login"
+    key = "pass"
+    target = "example.com:4321"
+    scheme = "http"
+    timeouts = { default = "100ms", alice = "200ms" }
+    ping = { period = "4s", path = "healthcheck", method = "GET" }"#;
+
+    #[test]
+    fn config_read_and_apply() {
+        let mut config: HostConfig<Spec> =
+            toml::from_str(CONFIG_TEXT).expect("Config should deserialize smoothly");
+
+        assert_eq!(
+            config.credentials,
+            Some(Credentials {
+                name: "login".into(),
+                key: "pass".into(),
+            })
+        );
+        assert_eq!(
+            config.target,
+            Address::new("example.com", 4321)
+                .expect("Address should be created as 'example.com:4321'")
+        );
+        assert_eq!(config.scheme, Scheme::Http);
+        assert_eq!(config.timeouts.default, Duration::from_millis(100));
+        assert_eq!(config.timeouts.map.len(), 1);
+        assert_eq!(
+            config
+                .timeouts
+                .map
+                .get(&Spec::Alice)
+                .expect("Value for Spec::Alice should be presented")
+                .into_inner(),
+            Duration::from_millis(200)
+        );
+
+        let ping = config
+            .ping
+            .take()
+            .expect("Pinger config should be presented");
+
+        assert_eq!(ping.period, Duration::from_secs(4));
+        assert_eq!(ping.path, "healthcheck");
+        assert_eq!(ping.method, Method::GET);
+
+        let _ = Host::<SpecParams, NoSpawnHandle>::new::<MinimalBehaviour>(config)
+            .expect("Host instance should be created from config smoothly");
+    }
 }

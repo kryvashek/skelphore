@@ -105,19 +105,15 @@ impl<P: Params> Index<P::Key> for TimeoutsMap<P> {
 }
 
 #[cfg(test)]
-mod tests {
+pub mod tests {
     use enum_iterator::IntoEnumIterator;
 
     use super::*;
 
-    const CONFIG_TEXT: &str = r#"default = "111ms"
-    "alice" = "222ms"
-    "charlie" = "333ms""#;
-
     #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, IntoEnumIterator)]
     #[serde(rename_all = "lowercase")]
     #[repr(u8)]
-    enum Spec {
+    pub enum Spec {
         Undefined = 0,
         Alice,
         Bob,
@@ -139,15 +135,20 @@ mod tests {
         }
     }
 
-    struct SpecParams;
+    pub struct SpecParams;
 
     impl Params for SpecParams {
         type Key = Spec;
         type Array = UsualArray<{ Spec::ITEM_COUNT }>;
     }
 
+    const CONFIG_TEXT: &str = r#"
+    default = "111ms"
+    "alice" = "222ms"
+    charlie = "333ms""#;
+
     #[test]
-    fn config_read() {
+    fn config_read_and_apply() {
         let config: TimeoutsMapConfig<Spec> =
             toml::from_str(CONFIG_TEXT).expect("Config should deserialize smoothly");
         let timeouts = TimeoutsMap::<SpecParams>::from(config);
