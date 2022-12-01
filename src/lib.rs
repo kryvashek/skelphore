@@ -20,6 +20,8 @@ use credentials::Credentials;
 use ping::{pinger, Behaviour, Handling, MinimalBehaviour, NoHandling};
 use timeoutsmap::{Params, TimeoutsMap, TimeoutsMapConfig, TrivialKey, TrivialParams};
 
+pub use reqwest;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, PartialOrd, Ord, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum Scheme {
