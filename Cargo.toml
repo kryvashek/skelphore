@@ -25,3 +25,7 @@ thiserror = "1.0.31"
 [dev-dependencies]
 enum-iterator = "0.8"
 toml = "0.5.9"
+
+[features]
+default = ["pinger"]
+pinger = []
