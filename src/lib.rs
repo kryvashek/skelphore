@@ -326,6 +326,11 @@ impl<P: Params> Host<P> {
     ) -> RequestBuilder {
         self.0.request(method, path, spec, xri)
     }
+
+    #[inline]
+    pub fn ping(&self, method: Method, path: &str, timeout: Duration) -> RequestBuilder {
+        self.0.request_builder(method, path, timeout)
+    }
 }
 
 #[cfg(feature = "pinger")]
