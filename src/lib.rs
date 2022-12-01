@@ -11,6 +11,7 @@ use std::{
     convert::{TryFrom, TryInto},
     fmt::{Debug, Formatter, Result as FmtResult},
     hash::Hash,
+    ops::Deref,
     str::FromStr,
     sync::Arc,
     time::Duration,
@@ -74,44 +75,24 @@ impl<K: Eq + Hash + Into<usize> + Default> Default for HostConfig<K> {
     }
 }
 
-#[cfg(feature = "pinger")]
-#[derive(Debug)]
-pub enum PingState<H> {
-    Config(ping::Config),
-    Handle(H),
-}
-
-#[cfg(feature = "pinger")]
-struct HostInner<P: Params = TrivialParams, H: Handling = NoHandling> {
-    client: Client,
-    base_url: Url,
-    timeouts: TimeoutsMap<P>,
-    ping: Option<PingState<H::Handle>>,
-}
-
-#[cfg(not(feature = "pinger"))]
-struct HostInner<P: Params = TrivialParams> {
-    client: Client,
-    base_url: Url,
-    timeouts: TimeoutsMap<P>,
-}
-
 fn base_url(scheme: &'static str, instance: Address) -> Result<Url, Error> {
     let candidate = format!("{}://{}", scheme, instance);
     Url::from_str(&candidate).map_err(|source| Error::UrlParse { candidate, source })
 }
 
-#[cfg(feature = "pinger")]
-impl<P: Params, H: Handling> HostInner<P, H> {
-    pub fn new(config: HostConfig<P::Key>) -> Result<Self, Error> {
-        let HostConfig {
-            credentials,
-            target,
-            scheme,
-            timeouts,
-            ping,
-        } = config;
+struct HostInnerCommon<P: Params = TrivialParams> {
+    client: Client,
+    base_url: Url,
+    timeouts: TimeoutsMap<P>,
+}
 
+impl<P: Params> HostInnerCommon<P> {
+    pub fn new(
+        credentials: Option<Credentials>,
+        target: Address,
+        scheme: Scheme,
+        timeouts: TimeoutsMapConfig<P::Key>,
+    ) -> Result<Self, Error> {
         let mut client = Client::builder().user_agent(formatcp!(
             "{}/{}",
             env!("CARGO_PKG_NAME"),
@@ -134,7 +115,6 @@ impl<P: Params, H: Handling> HostInner<P, H> {
             client,
             base_url,
             timeouts: TimeoutsMap::<P>::from(timeouts),
-            ping: ping.map(PingState::Config),
         })
     }
 
@@ -158,6 +138,40 @@ impl<P: Params, H: Handling> HostInner<P, H> {
         let timeout = self.timeouts[spec.unwrap_or_default()];
         self.request_builder(method, path, timeout)
             .header("X-Request-Id", xri)
+    }
+}
+
+#[cfg(feature = "pinger")]
+#[derive(Debug)]
+pub enum PingState<H> {
+    Config(ping::Config),
+    Handle(H),
+}
+
+#[cfg(feature = "pinger")]
+struct HostInner<P: Params = TrivialParams, H: Handling = NoHandling> {
+    common: HostInnerCommon<P>,
+    ping: Option<PingState<H::Handle>>,
+}
+
+#[cfg(not(feature = "pinger"))]
+struct HostInner<P: Params = TrivialParams>(HostInnerCommon<P>);
+
+#[cfg(feature = "pinger")]
+impl<P: Params, H: Handling> HostInner<P, H> {
+    pub fn new(config: HostConfig<P::Key>) -> Result<Self, Error> {
+        let HostConfig {
+            credentials,
+            target,
+            scheme,
+            timeouts,
+            ping,
+        } = config;
+
+        Ok(Self {
+            common: HostInnerCommon::new(credentials, target, scheme, timeouts)?,
+            ping: ping.map(PingState::Config),
+        })
     }
 
     pub fn set_pinger<B: Behaviour<Handling = H>>(&mut self) -> bool {
@@ -189,51 +203,25 @@ impl<P: Params> HostInner<P> {
             timeouts,
         } = config;
 
-        let mut client = Client::builder().user_agent(formatcp!(
-            "{}/{}",
-            env!("CARGO_PKG_NAME"),
-            env!("CARGO_PKG_VERSION")
-        ));
-
-        if let Some(cred_vals) = credentials {
-            client =
-                client.default_headers(cred_vals.try_into().map_err(Error::CredentialsConvert)?)
-        }
-
-        let client = client
-            .https_only(matches!(scheme, Scheme::Https))
-            .build()
-            .map_err(Error::ClientBulid)?;
-
-        let base_url = base_url(scheme.into(), target)?;
-
-        Ok(Self {
-            client,
-            base_url,
-            timeouts: TimeoutsMap::<P>::from(timeouts),
-        })
+        HostInnerCommon::new(credentials, target, scheme, timeouts).map(Self)
     }
+}
 
-    pub fn url(&self, path: &str) -> Url {
-        let mut url = self.base_url.clone();
-        url.set_path(path);
-        url
+#[cfg(feature = "pinger")]
+impl<P: Params, H: Handling> Deref for HostInner<P, H> {
+    type Target = HostInnerCommon<P>;
+
+    fn deref(&self) -> &Self::Target {
+        &self.common
     }
+}
 
-    fn request_builder(&self, method: Method, path: &str, timeout: Duration) -> RequestBuilder {
-        self.client.request(method, self.url(path)).timeout(timeout)
-    }
+#[cfg(not(feature = "pinger"))]
+impl<P: Params> Deref for HostInner<P> {
+    type Target = HostInnerCommon<P>;
 
-    pub fn request(
-        &self,
-        method: Method,
-        path: &str,
-        spec: Option<P::Key>,
-        xri: &str,
-    ) -> RequestBuilder {
-        let timeout = self.timeouts[spec.unwrap_or_default()];
-        self.request_builder(method, path, timeout)
-            .header("X-Request-Id", xri)
+    fn deref(&self) -> &Self::Target {
+        &self.0
     }
 }
 
