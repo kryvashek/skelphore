@@ -101,14 +101,15 @@ impl<P: Params> Index<P::Key> for TimeoutsMap<P> {
 
 #[cfg(test)]
 pub mod tests {
-    use enum_iterator::IntoEnumIterator;
+    use enum_iterator::Sequence;
 
     use super::*;
 
-    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, IntoEnumIterator)]
+    #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Deserialize, Sequence, Default)]
     #[serde(rename_all = "lowercase")]
     #[repr(u8)]
     pub enum Spec {
+        #[default]
         Undefined = 0,
         Alice,
         Bob,
@@ -122,17 +123,11 @@ pub mod tests {
         }
     }
 
-    impl Default for Spec {
-        fn default() -> Self {
-            Spec::Undefined
-        }
-    }
-
     pub struct SpecParams;
 
     impl Params for SpecParams {
         type Key = Spec;
-        type Array = UsualArray<{ Spec::ITEM_COUNT }>;
+        type Array = UsualArray<{ Spec::CARDINALITY }>;
     }
 
     const CONFIG_TEXT: &str = r#"
