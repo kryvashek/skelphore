@@ -1,6 +1,6 @@
 [package]
 name = "skelphore"
-version = "0.4.2"
+version = "0.5.0"
 edition = "2018"
 authors = ["Artyom Sakharilenko <kryvashek@gmail.com>"]
 description = "Massive repeated HTTP(S) requests simplifier"
