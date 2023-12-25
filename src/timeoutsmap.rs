@@ -10,12 +10,6 @@ use std::{
 #[derive(PartialEq, Eq, Hash, Default, Deserialize)]
 pub struct TrivialKey;
 
-impl From<TrivialKey> for usize {
-    fn from(_: TrivialKey) -> Self {
-        0
-    }
-}
-
 pub trait Array: IndexMut<usize, Output = Duration> {
     fn new(default: Duration) -> Self;
 }
@@ -31,8 +25,10 @@ impl<const N: usize> Array for UsualArray<N> {
 pub type TrivialArray = UsualArray<1>;
 
 pub trait Params {
-    type Key: Eq + Hash + Into<usize> + Default;
+    type Key: Eq + Hash + Default;
     type Array: Array;
+
+    fn key_as_usize(key: &Self::Key) -> usize;
 }
 
 pub struct TrivialParams;
@@ -40,10 +36,14 @@ pub struct TrivialParams;
 impl Params for TrivialParams {
     type Key = TrivialKey;
     type Array = TrivialArray;
+
+    fn key_as_usize(_: &Self::Key) -> usize {
+        0
+    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
-pub struct TimeoutsMapConfig<K: Eq + Hash + Into<usize> + Default = TrivialKey> {
+pub struct TimeoutsMapConfig<K: Eq + Hash + Default = TrivialKey> {
     #[serde(
         with = "humantime_serde",
         default = "default_timeouts_map_config_default"
@@ -57,7 +57,7 @@ fn default_timeouts_map_config_default() -> Duration {
     Duration::from_millis(120)
 }
 
-impl<K: Eq + Hash + Into<usize> + Default> TimeoutsMapConfig<K> {
+impl<K: Eq + Hash + Default> TimeoutsMapConfig<K> {
     pub fn only_default(default_ms: u64) -> Self {
         Self {
             default: Duration::from_millis(default_ms),
@@ -70,7 +70,7 @@ impl<K: Eq + Hash + Into<usize> + Default> TimeoutsMapConfig<K> {
     }
 }
 
-impl<K: Eq + Hash + Into<usize> + Default> Default for TimeoutsMapConfig<K> {
+impl<K: Eq + Hash + Default> Default for TimeoutsMapConfig<K> {
     fn default() -> Self {
         Self {
             default: Self::def_default(),
@@ -86,7 +86,7 @@ impl<P: Params> From<TimeoutsMapConfig<P::Key>> for TimeoutsMap<P> {
     fn from(TimeoutsMapConfig { default, map }: TimeoutsMapConfig<P::Key>) -> Self {
         let mut this = Self(P::Array::new(default));
         map.into_iter()
-            .for_each(|(spec, duration)| this.0[spec.into()] = duration.into_inner());
+            .for_each(|(spec, duration)| this.0[P::key_as_usize(&spec)] = duration.into_inner());
         this
     }
 }
@@ -95,7 +95,7 @@ impl<P: Params> Index<P::Key> for TimeoutsMap<P> {
     type Output = Duration;
 
     fn index(&self, spec: P::Key) -> &Self::Output {
-        &self.0[spec.into()]
+        &self.0[P::key_as_usize(&spec)]
     }
 }
 
@@ -128,6 +128,10 @@ pub mod tests {
     impl Params for SpecParams {
         type Key = Spec;
         type Array = UsualArray<{ Spec::CARDINALITY }>;
+
+        fn key_as_usize(key: &Self::Key) -> usize {
+            *key as usize
+        }
     }
 
     const CONFIG_TEXT: &str = r#"

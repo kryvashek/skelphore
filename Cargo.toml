@@ -29,3 +29,4 @@ toml = "0.8.8"
 [features]
 default = ["pinger"]
 pinger = []
+callbacks = []
