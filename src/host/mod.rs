@@ -80,6 +80,7 @@ impl<P: Params> HostInner<P> {
             timeouts,
             #[cfg(feature = "pinger")]
             ping,
+            extras,
         } = config;
 
         let mut client = Client::builder().user_agent(formatcp!(
@@ -91,6 +92,10 @@ impl<P: Params> HostInner<P> {
         if let Some(cred_vals) = credentials {
             client =
                 client.default_headers(cred_vals.try_into().map_err(Error::CredentialsConvert)?)
+        }
+
+        if let Some(es) = extras {
+            client = es.apply(client);
         }
 
         let client = client
