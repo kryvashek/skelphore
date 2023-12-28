@@ -46,6 +46,7 @@ pub trait Params {
     type Handling: Handling;
     #[cfg(feature = "callbacks")]
     type Callbacks: Callbacks;
+    const USER_AGENT: &'static str;
 }
 
 pub struct TrivialParams;
@@ -56,6 +57,8 @@ impl Params for TrivialParams {
     type Handling = NoHandling;
     #[cfg(feature = "callbacks")]
     type Callbacks = TrivialCallbacks;
+    const USER_AGENT: &'static str =
+        formatcp!("{}/{}", env!("CARGO_PKG_NAME"), env!("CARGO_PKG_VERSION"));
 }
 
 struct HostInner<P: Params = TrivialParams> {
@@ -83,11 +86,7 @@ impl<P: Params> HostInner<P> {
             extras,
         } = config;
 
-        let mut client = Client::builder().user_agent(formatcp!(
-            "{}/{}",
-            env!("CARGO_PKG_NAME"),
-            env!("CARGO_PKG_VERSION")
-        ));
+        let mut client = Client::builder().user_agent(P::USER_AGENT);
 
         if let Some(cred_vals) = credentials {
             client =

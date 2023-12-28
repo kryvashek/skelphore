@@ -17,6 +17,11 @@ impl Params for HostParams {
     type Handling = NoHandling;
     #[cfg(feature = "callbacks")]
     type Callbacks = TrivialCallbacks;
+    const USER_AGENT: &'static str = formatcp!(
+        "{}-test/{}",
+        env!("CARGO_PKG_NAME"),
+        env!("CARGO_PKG_VERSION")
+    );
 }
 
 #[cfg(feature = "pinger")]
